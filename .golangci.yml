@@ -1,0 +1,24 @@
+version: "2"
+run:
+  timeout: 5m
+linters:
+  default: standard
+  enable:
+    - bodyclose
+    - errorlint
+    - gosec
+    - misspell
+    - noctx
+    - unconvert
+  settings:
+    gosec:
+      excludes:
+        - G404 # math/rand is used for sampling and jitter only
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters: [gosec, noctx, bodyclose, errcheck]
+      # The spike command reads and writes the files the operator names.
+      - path: cmd/gfs-spike/
+        linters: [gosec]
+        text: "G(301|302|304|306|703)"

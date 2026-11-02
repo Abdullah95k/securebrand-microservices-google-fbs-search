@@ -1,0 +1,10 @@
+# Credentials: API keys and anything else in secrets/ never leave the server.
+secrets/
+# Spike and run output: reports, results files (URLs found).
+out/
+*.csv
+# Proxy files, if one is ever copied here by mistake.
+proxies.yaml
+*.key
+.env
+/gfs-spike
