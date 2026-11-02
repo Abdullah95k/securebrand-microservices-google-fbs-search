@@ -1,14 +1,17 @@
 package secret
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -72,6 +75,8 @@ func TestCleanError(t *testing.T) {
 	cases := []error{
 		&url.Error{Op: "Get", URL: "https://api.example.com/search?api_key=" + key, Err: errors.New("dial tcp: timeout")},
 		&url.Error{Op: "Get", URL: "https://www.google.com/search?q=x", Err: &url.Error{Op: "proxyconnect", URL: "http://user:" + key + "@203.0.113.1:8000", Err: errors.New("connection refused")}},
+		&url.Error{Op: "Get", URL: "https://x", Err: &net.OpError{Op: "proxyconnect", Net: "tcp", Err: errors.New("dial tcp 203.0.113.1:8000: i/o error")}},
+		&url.Error{Op: "Get", URL: "https://x", Err: errors.New("dial tcp 203.0.113.1:8000: weird")},
 		&url.Error{Op: "Get", URL: "https://x", Err: errors.New("bad proxy http://user:" + key + "@203.0.113.1:8000")},
 		fmt.Errorf("wrapped: %w", &url.Error{Op: "Get", URL: "https://x/?key=" + key, Err: errors.New("EOF")}),
 		errors.New("parse http://user:" + key + "@host: invalid"),
@@ -89,7 +94,22 @@ func TestCleanError(t *testing.T) {
 	if !errors.Is(CleanError(plain), plain) {
 		t.Error("an error without a URL is kept")
 	}
-	if got := CleanError(cases[0]).Error(); !strings.Contains(got, "timeout") {
-		t.Errorf("the cause must survive: %s", got)
+	// What failed survives; addresses don't.
+	proxyDown := &url.Error{Op: "Get", URL: "https://www.google.com/search?q=x", Err: &net.OpError{Op: "proxyconnect", Net: "tcp",
+		Err: &net.OpError{Op: "dial", Net: "tcp", Addr: &net.TCPAddr{IP: net.IPv4(203, 0, 113, 10), Port: 8000}, Err: syscall.ECONNREFUSED}}}
+	if got := CleanError(proxyDown).Error(); got != "connection refused (connecting to the proxy)" {
+		t.Errorf("proxy down: %q", got)
+	}
+	dns := &url.Error{Op: "Get", URL: "https://api.mojeek.com/search?api_key=" + key, Err: &net.DNSError{Err: "no such host", Name: "api.mojeek.com"}}
+	if got := CleanError(dns).Error(); got != "address lookup failed" {
+		t.Errorf("dns: %q", got)
+	}
+	readReset := &net.OpError{Op: "read", Net: "tcp", Addr: &net.TCPAddr{IP: net.IPv4(203, 0, 113, 10), Port: 8000}, Err: syscall.ECONNRESET}
+	if got := CleanError(readReset).Error(); got != "connection closed" {
+		t.Errorf("read reset: %q", got)
+	}
+	timeout := &url.Error{Op: "Get", URL: "https://x", Err: context.DeadlineExceeded}
+	if got := CleanError(timeout).Error(); got != "timed out" {
+		t.Errorf("timeout: %q", got)
 	}
 }

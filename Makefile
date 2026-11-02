@@ -31,7 +31,7 @@ secret:
 	@case "$(NAME)" in *[!a-z0-9_]*) echo "NAME may hold only a-z, 0-9 and _"; exit 2;; esac
 	@umask 077; mkdir -p secrets; chmod 700 secrets; \
 	printf 'Paste the value for %s, then press Enter (nothing is shown): ' "$(NAME)"; \
-	stty -echo 2>/dev/null; read -r v; stty echo 2>/dev/null; echo; \
+	trap 'stty echo 2>/dev/null' EXIT INT TERM; stty -echo 2>/dev/null; read -r v; stty echo 2>/dev/null; echo; \
 	test -n "$$v" || { echo "nothing saved: the value was empty"; exit 1; }; \
 	printf '%s\n' "$$v" > secrets/$(NAME); chmod 600 secrets/$(NAME); \
 	echo "saved secrets/$(NAME)"

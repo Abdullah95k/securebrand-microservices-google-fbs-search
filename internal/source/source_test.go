@@ -144,6 +144,7 @@ func TestClassifyGoogle(t *testing.T) {
 		{"429", 429, "", "<html>sorry</html>", Captcha, 0},
 		{"captcha form", 200, "", `<form id="captcha-form">`, Captcha, 0},
 		{"unusual traffic", 200, "", `Our systems have detected unusual traffic from your computer network.`, Captcha, 0},
+		{"results despite a js fallback", 200, "", `<noscript><meta content="0;url=/httpservice/retry/enablejs?sei=x"></noscript>` + results, OK, 2},
 		{"js wall", 200, "", `<noscript><meta http-equiv="refresh" content="0;url=/httpservice/retry/enablejs?sei=x"></noscript>`, BotCheck, 0},
 		{"consent", 302, "https://consent.google.com/ml?continue=x", "", Consent, 0},
 		{"other redirect", 302, "https://www.google.iq/search?q=x", "", Failed, 0},
@@ -182,5 +183,8 @@ func TestGoogleRotatesExitsAndNeverFollowsRedirects(t *testing.T) {
 	_ = g.Search(context.Background(), Query{Term: "x", Lang: "ar", Window: PastWeek})
 	if g.next != 2 {
 		t.Fatal("exits rotate")
+	}
+	if r := (&Google{}).Search(context.Background(), Query{Term: "x"}); r.Outcome != Failed {
+		t.Fatalf("no exits: %+v", r)
 	}
 }

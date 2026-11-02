@@ -57,6 +57,9 @@ func (*Google) Supports(w Window) bool { return true }
 var googleTBS = map[Window]string{PastDay: "qdr:d", PastWeek: "qdr:w", PastMonth: "qdr:m"}
 
 func (g *Google) Search(ctx context.Context, q Query) Response {
+	if len(g.Clients) == 0 {
+		return failed(0, "no proxy exits")
+	}
 	g.mu.Lock()
 	i := g.next % len(g.Clients)
 	g.next++
@@ -111,7 +114,9 @@ var (
 )
 
 // ClassifyGoogle reads one google.com/search answer: a wall, or the
-// facebook.com result links it holds (rank order, each once).
+// facebook.com result links it holds (rank order, each once). A page that
+// carries result links is an answer even if it also has a "turn on
+// JavaScript" fallback; a CAPTCHA always wins.
 func ClassifyGoogle(status int, location string, body []byte) Response {
 	loc := strings.ToLower(location)
 	switch {
@@ -123,14 +128,21 @@ func ClassifyGoogle(status int, location string, body []byte) Response {
 		return Response{Outcome: Captcha, Status: status, Detail: "HTTP 429 (Google's CAPTCHA page)"}
 	case captchaRe.Match(body):
 		return Response{Outcome: Captcha, Status: status, Detail: "a CAPTCHA / unusual traffic page"}
-	case jsWallRe.Match(body):
-		return Response{Outcome: BotCheck, Status: status, Detail: `a "turn on JavaScript" page: results are only served to a browser`}
 	case status >= 300 && status < 400:
 		return failed(status, "redirected elsewhere")
 	case status != http.StatusOK:
 		return failed(status, "Google answered an error")
 	}
-	r := Response{Outcome: OK, Status: status}
+	urls := facebookLinks(body)
+	if len(urls) == 0 && jsWallRe.Match(body) {
+		return Response{Outcome: BotCheck, Status: status, Detail: `a "turn on JavaScript" page: results are only served to a browser`}
+	}
+	return Response{Outcome: OK, Status: status, URLs: urls}
+}
+
+// facebookLinks returns the facebook.com links of a page, each once.
+func facebookLinks(body []byte) []string {
+	var out []string
 	seen := map[string]bool{}
 	for _, m := range hrefRe.FindAllSubmatch(body, -1) {
 		u := resultLink(html.UnescapeString(string(m[1])))
@@ -141,9 +153,9 @@ func ClassifyGoogle(status int, location string, body []byte) Response {
 			continue
 		}
 		seen[u] = true
-		r.URLs = append(r.URLs, u)
+		out = append(out, u)
 	}
-	return r
+	return out
 }
 
 // resultLink returns the target of a result link: the link itself, or

@@ -112,7 +112,14 @@ func TestRunCounts(t *testing.T) {
 		t.Fatalf("rows = %+v", rows)
 	}
 
-	err := st.CheckKnown(context.Background(), func(_ context.Context, ref string) (bool, error) { return ref == "v:brand", nil })
+	asked := 0
+	err := CheckKnown(context.Background(), []*Stats{st, st}, func(_ context.Context, ref string) (bool, error) {
+		asked++
+		return ref == "v:brand", nil
+	})
+	if asked != 3 {
+		t.Fatalf("each ref is asked once across runs: %d", asked)
+	}
 	if err != nil || st.NewCount(map[string]bool{"v:brand": true, "v:other": true}) != 1 {
 		t.Fatalf("known = %v %v", st.Known, err)
 	}
@@ -200,8 +207,8 @@ func TestRunInterrupted(t *testing.T) {
 func TestCheckKnownError(t *testing.T) {
 	st := newStats("x", time.Time{})
 	st.window(source.PastWeek).Refs["v:a"] = "en"
-	if err := st.CheckKnown(context.Background(), func(context.Context, string) (bool, error) { return false, errors.New("down") }); err == nil {
-		t.Fatal("want the error")
+	if err := CheckKnown(context.Background(), []*Stats{st}, func(context.Context, string) (bool, error) { return false, errors.New("down") }); err == nil || st.Known != nil {
+		t.Fatal("want the error, and Known unset")
 	}
 	if (&Stats{}).NewCount(nil) != -1 {
 		t.Fatal("unchecked is -1")

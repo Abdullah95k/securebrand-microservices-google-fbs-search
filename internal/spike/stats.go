@@ -2,6 +2,7 @@ package spike
 
 import (
 	"context"
+	"maps"
 	"slices"
 	"time"
 
@@ -121,16 +122,26 @@ func (s *Stats) AllRefs() []string {
 	return out
 }
 
-// CheckKnown asks fbs about every reference found. It stops at the first
-// error and returns it; Known keeps what was answered.
-func (s *Stats) CheckKnown(ctx context.Context, known func(context.Context, string) (bool, error)) error {
-	s.Known = map[string]bool{}
-	for _, r := range s.AllRefs() {
-		ok, err := known(ctx, r)
+// CheckKnown asks fbs once about every reference the runs found, and
+// gives every run the answers. On an error it returns it and leaves Known
+// unset (nil), so the report says "not checked" rather than guess.
+func CheckKnown(ctx context.Context, runs []*Stats, known func(context.Context, string) (bool, error)) error {
+	all := map[string]bool{}
+	for _, r := range runs {
+		for _, ref := range r.AllRefs() {
+			all[ref] = true
+		}
+	}
+	answers := make(map[string]bool, len(all))
+	for _, ref := range slices.Sorted(maps.Keys(all)) {
+		ok, err := known(ctx, ref)
 		if err != nil {
 			return err
 		}
-		s.Known[r] = ok
+		answers[ref] = ok
+	}
+	for _, r := range runs {
+		r.Known = answers
 	}
 	return nil
 }

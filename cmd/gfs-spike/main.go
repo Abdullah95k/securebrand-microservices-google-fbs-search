@@ -159,6 +159,9 @@ func (c *common) flags(fs *flag.FlagSet, perLang int) {
 }
 
 func (c *common) setup(ctx context.Context) (*fbs.Client, []fbs.Keyword, spike.Header, error) {
+	if c.perLang < 1 {
+		return nil, nil, spike.Header{}, errors.New("--per-lang must be at least 1")
+	}
 	key, err := secret.ReadFile(c.fbsKey)
 	if err != nil {
 		return nil, nil, spike.Header{}, fmt.Errorf("fbs API key: %w", err)
@@ -213,11 +216,12 @@ func (c *common) resultsFile(name string) (func(spike.Row) error, func(), string
 }
 
 func (c *common) report(ctx context.Context, client *fbs.Client, h spike.Header, runs []*spike.Stats, name string) error {
-	for _, r := range runs {
-		if err := r.CheckKnown(ctx, client.Known); err != nil {
-			fmt.Fprintln(os.Stderr, "could not check which pages fbs already knows:", err)
-			r.Known = nil
-		}
+	// Also after Ctrl-C, so a partial run still gets its report, but
+	// bounded: a slow fbs must not hold the report back.
+	kctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Minute)
+	defer cancel()
+	if err := spike.CheckKnown(kctx, runs, client.Known); err != nil {
+		fmt.Fprintln(os.Stderr, "could not check which pages fbs already knows:", err)
 	}
 	path := filepath.Join(c.out, fmt.Sprintf("report-%s-%s.txt", name, time.Now().In(spike.Iraq).Format("20060102-1504")))
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
@@ -243,6 +247,9 @@ func runAPIs(ctx context.Context, log *slog.Logger, args []string) error {
 	minGap := fs.Duration("min-gap", 2*time.Second, "shortest pause between queries")
 	maxGap := fs.Duration("max-gap", 5*time.Second, "longest pause between queries")
 	_ = fs.Parse(args)
+	if *maxQ < 1 || *minGap < time.Second || *maxGap < *minGap {
+		return errors.New("--max-queries must be at least 1, --min-gap at least 1s, and --max-gap at least --min-gap")
+	}
 
 	ws, err := parseWindows(*windows)
 	if err != nil {
@@ -274,7 +281,7 @@ func runAPIs(ctx context.Context, log *slog.Logger, args []string) error {
 	if path != "" {
 		fmt.Fprintf(os.Stderr, "results file (URLs found; delete it when done): %s\n", path)
 	}
-	return c.report(context.WithoutCancel(ctx), client, h, runs, "apis")
+	return c.report(ctx, client, h, runs, "apis")
 }
 
 func apiSources(list, dir string) ([]source.Source, error) {
@@ -344,8 +351,8 @@ func runGoogle(ctx context.Context, log *slog.Logger, args []string) error {
 	if !*accept {
 		return errors.New("google's terms don't allow automated queries: this probe runs only with --accept-google-terms-risk (read docs/spike.md first)")
 	}
-	if *minGap < time.Minute {
-		return errors.New("--min-gap must be at least 1m")
+	if *minGap < time.Minute || *maxGap < *minGap || *maxQ < 1 {
+		return errors.New("--min-gap must be at least 1m, --max-gap at least --min-gap, and --max-queries at least 1")
 	}
 	w, err := source.ParseWindow(*window)
 	if err != nil {
@@ -372,5 +379,5 @@ func runGoogle(ctx context.Context, log *slog.Logger, args []string) error {
 	if path != "" {
 		fmt.Fprintf(os.Stderr, "results file (URLs found; delete it when done): %s\n", path)
 	}
-	return c.report(context.WithoutCancel(ctx), client, h, []*spike.Stats{st}, "google")
+	return c.report(ctx, client, h, []*spike.Stats{st}, "google")
 }
